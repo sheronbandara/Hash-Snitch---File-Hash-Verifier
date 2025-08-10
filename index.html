@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hash Snitch - File Hash Verifier</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="container" role="main" aria-label="File Hash Verifier Application">
+
+  <h1>Hash Snitch - File Hash Verifier</h1>
+
+  <div id="dropzone" tabindex="0" aria-label="File drop zone. Click or drag and drop files here.">
+    Drag & Drop files here or click to browse
+  </div>
+  <input type="file" id="fileInput" multiple style="display:none" aria-hidden="true" />
+
+  <div class="form-group">
+    <label for="algo">Hash Algorithm:</label>
+    <select id="algo" aria-describedby="algoDescription">
+      <option value="SHA-256">SHA-256</option>
+      <option value="SHA-1">SHA-1</option>
+      <option value="MD5">MD5</option>
+    </select>
+    <small id="algoDescription" style="color:#666;">Select the hashing algorithm to use.</small>
+  </div>
+
+  <div id="fileList" aria-live="polite" aria-relevant="additions"></div>
+
+  <div class="form-group compare-section" aria-label="Compare hash section">
+    <label for="knownHash" style="flex-basis: 100%;">Compare with known hash:</label>
+    <input type="text" id="knownHash" size="70" placeholder="Paste known hash here" aria-label="Known hash to compare" />
+    <button id="compareBtn" class="btn" aria-label="Compare hash button">Compare</button>
+  </div>
+
+  <div id="results" role="alert" aria-live="assertive"></div>
+
+</div>
+
+<script>
+// JS code here (same as before) ...
+// Helper: convert ArrayBuffer to hex string
+function bufferToHex(buffer) {
+  return [...new Uint8Array(buffer)]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// MD5 polyfill using SparkMD5 (load from CDN)
+function md5Hash(file) {
+  return new Promise((resolve, reject) => {
+    const chunkSize = 2097152; // 2MB chunks
+    const spark = new SparkMD5.ArrayBuffer();
+    const fileReader = new FileReader();
+    let cursor = 0;
+
+    fileReader.onerror = () => reject('File read error');
+    fileReader.onload = e => {
+      spark.append(e.target.result);
+      cursor += chunkSize;
+      if (cursor < file.size) readNextChunk();
+      else resolve(spark.end());
+    };
+
+    function readNextChunk() {
+      const slice = file.slice(cursor, cursor + chunkSize);
+      fileReader.readAsArrayBuffer(slice);
+    }
+
+    readNextChunk();
+  });
+}
+
+// Calculate hash using crypto.subtle (for SHA-1 and SHA-256)
+async function calculateHash(file, algo) {
+  if (algo === 'MD5') {
+    // Load SparkMD5 dynamically if needed
+    if (!window.SparkMD5) {
+      await new Promise(res => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/spark-md5@3.0.2/spark-md5.min.js';
+        script.onload = res;
+        document.head.appendChild(script);
+      });
+    }
+    return md5Hash(file);
+  } else {
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest(algo, arrayBuffer);
+    return bufferToHex(hashBuffer);
+  }
+}
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const algoSelect = document.getElementById('algo');
+const knownHashInput = document.getElementById('knownHash');
+const compareBtn = document.getElementById('compareBtn');
+const resultsDiv = document.getElementById('results');
+
+let currentHashes = new Map();
+
+dropzone.addEventListener('click', () => fileInput.click());
+
+dropzone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropzone.classList.add('dragover');
+});
+
+dropzone.addEventListener('dragleave', e => {
+  dropzone.classList.remove('dragover');
+});
+
+dropzone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  const files = e.dataTransfer.files;
+  await handleFiles(files);
+});
+
+fileInput.addEventListener('change', async e => {
+  const files = e.target.files;
+  await handleFiles(files);
+  fileInput.value = '';
+});
+
+async function handleFiles(files) {
+  resultsDiv.textContent = '';
+  currentHashes.clear();
+  fileList.innerHTML = '';
+  const algo = algoSelect.value;
+
+  for (const file of files) {
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    div.textContent = `Calculating ${algo} for ${file.name}...`;
+    fileList.appendChild(div);
+
+    try {
+      const hash = await calculateHash(file, algo);
+      currentHashes.set(file.name, hash);
+      div.textContent = `${file.name} — ${algo}: ${hash}`;
+    } catch (err) {
+      div.textContent = `${file.name} — Error: ${err}`;
+    }
+  }
+}
+
+compareBtn.addEventListener('click', () => {
+  resultsDiv.textContent = '';
+  if (currentHashes.size === 0) {
+    resultsDiv.className = '';
+    resultsDiv.style.color = '#c62828';
+    resultsDiv.textContent = 'Please upload files first.';
+    return;
+  }
+  const known = knownHashInput.value.trim().toLowerCase();
+  if (!known) {
+    resultsDiv.className = '';
+    resultsDiv.style.color = '#c62828';
+    resultsDiv.textContent = 'Please enter a known hash to compare.';
+    return;
+  }
+
+  let matchedFiles = [];
+  let unmatchedFiles = [];
+  for (const [name, hash] of currentHashes.entries()) {
+    if (hash.toLowerCase() === known) matchedFiles.push(name);
+    else unmatchedFiles.push(name);
+  }
+  resultsDiv.innerHTML = '';
+  if (matchedFiles.length > 0) {
+    const p = document.createElement('p');
+    p.className = 'match';
+    p.textContent = `Match found for files: ${matchedFiles.join(', ')}`;
+    resultsDiv.appendChild(p);
+  }
+  if (unmatchedFiles.length > 0) {
+    const p = document.createElement('p');
+    p.className = 'no-match';
+    p.textContent = `No match for files: ${unmatchedFiles.join(', ')}`;
+    resultsDiv.appendChild(p);
+  }
+});
+</script>
+
+</body>
+</html>
