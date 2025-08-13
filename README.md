@@ -2,6 +2,8 @@
 
 Hash Snitch is a modern, user-friendly web application that allows users to calculate and verify file hashes using popular algorithms such as SHA-256, SHA-1, and MD5. The app supports drag-and-drop file uploads and enables easy comparison with known hashes for file integrity verification.
 
+URL for the web page: https://sheronbandara.github.io/Hash-Snitch/
+
 ## Features
 
 * Calculate file hashes (SHA-256, SHA-1, MD5) directly in the browser
